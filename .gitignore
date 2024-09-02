@@ -1,3 +1,7 @@
 /target
 measurements.txt
+middle.txt
 small.txt
+flamegraph.svg
+perf.data
+perf.data.old
