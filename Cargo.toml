@@ -1,0 +1,11 @@
+[package]
+name = "brc-rust-simd"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+panic="abort"
