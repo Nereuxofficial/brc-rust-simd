@@ -1,44 +1,68 @@
 #![feature(portable_simd)]
 #![feature(iter_array_chunks)]
+#![feature(array_chunks)]
+#![feature(slice_as_chunks)]
 use std::collections::HashMap;
-use std::io::BufRead;
+use std::io::{BufRead, Read};
 use std::ops::Div;
 use std::simd::num::{SimdFloat, SimdInt};
-use std::simd::{f32x8, i32x8};
+use std::simd::{f32x8, i16x16, i32x8};
 use std::{error::Error, io::BufReader};
+
+struct City {
+    count: i16,
+    sum: i16,
+    max: i16,
+    min: i16,
+}
+
+impl Default for City {
+    fn default() -> Self {
+        Self {
+            count: 0,
+            sum: 0,
+            max: i16::min_value(),
+            min: i16::max_value(),
+        }
+    }
+}
+
+impl City {
+    fn add(&mut self, value: i16) {
+        self.count += 1;
+        self.sum += value;
+        self.min = self.min.min(value);
+        self.max = self.max.max(value);
+    }
+}
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = std::env::args();
-    let measurements = std::fs::File::open(args.nth(1).unwrap())?;
-    let reader = BufReader::new(measurements);
-    let mut measurements: HashMap<String, Vec<i32>> = HashMap::new();
+    let mut measurements = std::fs::File::open(args.nth(1).unwrap())?;
+    let mut reader = String::new();
+    measurements.read_to_string(&mut reader).unwrap();
+    let mut measurements: HashMap<&str, City> = HashMap::new();
     for line in reader.lines() {
-        let line = line?;
-        let mut parts = line.split(';');
-        let name = parts.next().unwrap().to_string();
-        let value: i32 = parts
-            .next()
-            .unwrap()
+        let (name, v) = line.split_once(';').unwrap();
+        let value: i16 = v
             .chars()
             .filter(|c| *c != '.')
             .collect::<String>()
             .parse()
             .unwrap();
-        match measurements.get_mut(&name) {
-            Some(m) => m.push(value),
-            None => {
-                measurements.insert(name, vec![value]);
-            }
-        }
+        measurements
+            .entry(name)
+            .or_insert(Default::default())
+            .add(value);
     }
     let mut output = measurements
         .into_iter()
-        .map(|(name, val)| {
+        .map(|(name, city)| {
             format!(
                 "{name};{};{};{}\n",
-                fmt_num(*val.iter().min().unwrap()),
-                fmt_num(get_average_simd(&mut val.iter())),
-                fmt_num(*val.iter().max().unwrap())
+                fmt_num(city.min),
+                fmt_num(city.sum.div(city.count)),
+                fmt_num(city.max)
             )
         })
         .collect::<Vec<_>>();
@@ -50,12 +74,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn fmt_num(num: i32) -> String {
+fn fmt_num(num: i16) -> String {
     let num_str = num.to_string();
     let num_chars = num_str.chars().rev().enumerate();
     let mut s = String::with_capacity(4);
     for (i, d) in num_chars {
-        if i == 2 {
+        if i == 1 {
             s.push('.');
         }
         s.push(d);
@@ -63,39 +87,38 @@ fn fmt_num(num: i32) -> String {
     s.chars().rev().collect()
 }
 
-fn get_average_simd<'a, I: Iterator<Item = &'a i32>>(iter: &mut I) -> i32 {
+fn get_average_simd(slice: &[i16]) -> i16 {
     let mut count = 0;
-    let sum_matrix = iter
-        .copied()
-        .array_chunks::<8>()
-        .map(i32x8::from_array)
-        .fold(i32x8::splat(0), |acc, x| {
+    let (chunks, remainder) = slice.as_chunks();
+    let sum_matrix = chunks
+        .iter()
+        .map(|array: &[i16; 16]| i16x16::from_array(*array))
+        .fold(i16x16::splat(0), |acc, x| {
             count += 4;
             acc + x
         });
-    let mut remain = 0;
-    for _ in 0..8 {
-        if let Some(v) = iter.next() {
-            remain += v;
-        } else {
-            break;
-        }
-    }
+    let remain: i16 = remainder.iter().sum();
     (sum_matrix.reduce_sum() + remain)
         .checked_div(count)
         .unwrap_or(0)
 }
 
-fn get_average<'a, I: Iterator<Item = &'a i32>>(iter: I) -> i32 {
+fn get_average(slice: &[i16]) -> i16 {
     let mut count = 0;
-    iter.fold(0, |acc, x| {
-        count += 1;
-        acc + x
-    })
-    .div(count)
+    slice
+        .iter()
+        .fold(0, |acc, x| {
+            count += 1;
+            acc + x
+        })
+        .div(count)
 }
 #[cfg(debug_assertions)]
 mod tests {
+    use std::time::{Duration, Instant};
+
+    use rand::{distributions::Standard, thread_rng, Rng};
+
     use super::*;
 
     #[test]
@@ -103,6 +126,29 @@ mod tests {
         let num = -789;
         let num2 = 678;
         println!("num: {}, num2: {}", fmt_num(num), fmt_num(num2));
-        assert_eq!("-9.87", fmt_num(-987));
+        assert_eq!("-98.7", fmt_num(-987));
+    }
+
+    #[test]
+    fn test_get_avg_simd() {
+        let mut rng = thread_rng();
+        // Measure get_avg_simd for increasing numbers of input values. Output the data recorded as JSON
+        struct Measurement {
+            input_size: usize,
+            old_time: Duration,
+            new_time: Duration,
+        }
+        const max_size: usize = 100;
+        const samples: usize = 10;
+        for i in 0..max_size {
+            let results = [0; max_size];
+            let measurements = [0; samples];
+            for s in 0..samples {
+                let input = rng.sample_iter(&Standard).take(i).map(|f| &f);
+                let start = Instant::now();
+                get_average_simd(&mut input);
+                let time = Instant::now().duration_since(start);
+            }
+        }
     }
 }
