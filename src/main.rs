@@ -70,7 +70,7 @@ fn get_average_simd<'a, I: Iterator<Item = &'a i32>>(iter: &mut I) -> i32 {
         .array_chunks::<8>()
         .map(i32x8::from_array)
         .fold(i32x8::splat(0), |acc, x| {
-            count += 4;
+            count += 8;
             acc + x
         });
     let mut remain = 0;
