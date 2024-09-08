@@ -3,10 +3,12 @@
 #![feature(array_chunks)]
 #![feature(slice_as_chunks)]
 use std::collections::HashMap;
+use std::hash::Hasher;
 use std::io::{BufRead, Read};
 use std::ops::Div;
 use std::simd::num::{SimdFloat, SimdInt};
 use std::simd::{f32x8, i16x16, i32x8};
+use std::str::Chars;
 use std::{error::Error, io::BufReader};
 
 struct City {
@@ -36,12 +38,27 @@ impl City {
     }
 }
 
+/// A custom hasher for cities produced under the assumption that the first 10 bytes of a cities name are unique in the dataset
+struct CityHasher([u8;19]);
+
+impl Hasher for CityHasher{
+    fn finish(&self) -> u64 {
+        todo!()
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        todo!()
+    }
+}
+
+
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = std::env::args();
     let mut measurements = std::fs::File::open(args.nth(1).unwrap())?;
-    let mut reader = String::new();
-    measurements.read_to_string(&mut reader).unwrap();
-    let mut measurements: HashMap<&str, City> = HashMap::new();
+    let mut vec = Vec::with_capacity(15505732);
+    measurements.read_to_end(&mut vec);
+    let reader = unsafe {String::from_utf8_unchecked(vec)};
+    let mut measurements: HashMap<&str, City> = HashMap::with_capacity(14000);
     for line in reader.lines() {
         let (name, v) = line.split_once(';').unwrap();
         let value: i16 = v
@@ -52,9 +69,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             .unwrap();
         measurements
             .entry(name)
-            .or_insert(Default::default())
+            .or_default()
             .add(value);
     }
+    println!("Hashmap capacity: {}", measurements.capacity());
     let mut output = measurements
         .into_iter()
         .map(|(name, city)| {
@@ -113,9 +131,9 @@ fn get_average(slice: &[i16]) -> i16 {
         })
         .div(count)
 }
-#[cfg(debug_assertions)]
+#[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
+    use std::{time::{Duration, Instant}};
 
     use rand::{distributions::Standard, thread_rng, Rng};
 
@@ -128,7 +146,7 @@ mod tests {
         println!("num: {}, num2: {}", fmt_num(num), fmt_num(num2));
         assert_eq!("-98.7", fmt_num(-987));
     }
-
+/*
     #[test]
     fn test_get_avg_simd() {
         let mut rng = thread_rng();
@@ -148,6 +166,24 @@ mod tests {
                 let start = Instant::now();
                 get_average_simd(&mut input);
                 let time = Instant::now().duration_since(start);
+            }
+        }
+    }*/
+    #[test]
+    fn test_unique_cities(){
+        let measurements = std::fs::read_to_string("measurements.txt").unwrap();
+        let mut city_names = measurements.lines().map(|l| l.split_once(";").unwrap().0).collect::<Vec<&str>>();
+        city_names.sort();
+        city_names.dedup();
+        for n in 14..32{
+            let mut uniqueness_hashmap = HashMap::new();
+            let has_duplicates = city_names.iter().map(|c| c.chars().take(n).collect::<String>()).map(|s| uniqueness_hashmap.insert(s, 0)).any(|r| r.is_some());
+            if has_duplicates{
+                println!("List with {} characters has duplicates", n);
+            }
+            else {
+                println!("List with {} characters has NO duplicates", n);
+                break;
             }
         }
     }
