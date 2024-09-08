@@ -169,22 +169,4 @@ mod tests {
             }
         }
     }*/
-    #[test]
-    fn test_unique_cities(){
-        let measurements = std::fs::read_to_string("measurements.txt").unwrap();
-        let mut city_names = measurements.lines().map(|l| l.split_once(";").unwrap().0).collect::<Vec<&str>>();
-        city_names.sort();
-        city_names.dedup();
-        for n in 14..32{
-            let mut uniqueness_hashmap = HashMap::new();
-            let has_duplicates = city_names.iter().map(|c| c.chars().take(n).collect::<String>()).map(|s| uniqueness_hashmap.insert(s, 0)).any(|r| r.is_some());
-            if has_duplicates{
-                println!("List with {} characters has duplicates", n);
-            }
-            else {
-                println!("List with {} characters has NO duplicates", n);
-                break;
-            }
-        }
-    }
 }
